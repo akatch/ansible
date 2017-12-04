@@ -36,9 +36,10 @@ class CallbackModule(CallbackBase):
         task_start_time = float(time.time())
 
         if self.prev_task_start_time > 0:
-            task_name = self.current_task_name
+            task_name = self.prev_task_name
             task_runtime = float(task_start_time - self.prev_task_start_time)
-            print('%s runtime: %f' % (task_name, task_runtime))
+            #print('%s runtime: %f' % (task_name, task_runtime))
+            self.statistics[task_name] = task_runtime
         self.prev_task_start_time = task_start_time
         return
 
@@ -46,6 +47,8 @@ class CallbackModule(CallbackBase):
         super(CallbackModule, self).__init__()
         self.prev_task_start_time = float(0)
         self.current_task_name = None
+        self.prev_task_name = None
+        self.statistics = dict()
 
     def v2_playbook_on_play_start(self, play):
         super(CallbackModule, self).v2_playbook_on_play_start(play)
@@ -55,6 +58,7 @@ class CallbackModule(CallbackBase):
         super(CallbackModule, self).v2_playbook_on_task_start(task, is_conditional)
         self.current_task_name = task.get_name()
         self._process_task_time()
+        self.prev_task_name = self.current_task_name
         return
 
     def v2_playbook_on_start(self, playbook):
@@ -64,4 +68,6 @@ class CallbackModule(CallbackBase):
     def v2_playbook_on_stats(self, stats):
         self._process_task_time()
         super(CallbackModule, self).v2_playbook_on_stats(stats)
+        for statname, statval in self.statistics.iteritems():
+            print('%s: %f' % (statname, statval))
         return
