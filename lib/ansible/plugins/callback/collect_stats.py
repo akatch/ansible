@@ -5,6 +5,7 @@ from __future__ import (absolute_import, division, print_function)
 
 # Make coding more python3-ish
 import time
+import socket
 from ansible.plugins.callback import CallbackBase
 
 __metaclass__ = type
@@ -21,6 +22,29 @@ DOCUMENTATION = '''
       - whitelisting in configuration
 '''
 
+"""
+Sort stats descending by value
+"""
+def sort_statistics(stats):
+    sorted_stats = sorted(stats.iteritems(), key=lambda (k, v): (v, k), reverse=True)
+    return sorted_stats
+
+def print_statistics(stats):
+    for statname, statval in sort_statistics(stats):
+        print('%s %s' % (statname, statval))
+    return
+
+def send_statistics_report(stats_host, stats_port, stats_dict):
+    # TODO delegate this to a play host
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((stats_host, int(stats_port)))
+
+    for statname, statval in sort_statistics(stats_dict):
+        statline = '%s %s\n' % (statname, statval)
+        sock.sendall(statline)
+
+    sock.shutdown(socket.SHUT_WR)
+    sock.close()
 
 class CallbackModule(CallbackBase):
     """
@@ -31,6 +55,9 @@ class CallbackModule(CallbackBase):
     CALLBACK_TYPE = 'aggregate'
     CALLBACK_NAME = 'collect_stats'
     CALLBACK_NEEDS_WHITELIST = True
+
+    STATS_HOST = '127.0.0.1'
+    STATS_PORT = 2003
 
     def _get_task_display_name(self, task):
         display_name = task.get_name().strip().split(" : ")
@@ -52,11 +79,6 @@ class CallbackModule(CallbackBase):
         self.prev_task_start_time = task_start_time
         return
 
-    def _display_statistics(self):
-        for statname, statval in self.statistics.iteritems():
-            print('%s %s' % (statname, statval))
-        return
-
     def _format_statistic(self, stat_value, stat_time):
         statistic = '%f %i' % (stat_value, int(stat_time))
         return statistic
@@ -65,6 +87,7 @@ class CallbackModule(CallbackBase):
         schema_prefix = 'hostname.playbook_yml'
         statistic_schema = '%s.%s' % (schema_prefix, stat_name)
         return statistic_schema
+
 
     def __init__(self):
         super(CallbackModule, self).__init__()
@@ -94,5 +117,8 @@ class CallbackModule(CallbackBase):
         playbook_runtime = float(self.playbook_end_time - self.playbook_start_time)
         playbook_runtime_stat = self._format_statistic(playbook_runtime, self.playbook_end_time)
         self.statistics[self._format_statistic_schema('playbook_runtime')] = playbook_runtime_stat
-        self._display_statistics()
+
+        # if verbosity > 0:
+        #   print_statistics(self.statistics)
+        send_statistics_report(self.STATS_HOST, self.STATS_PORT, self.statistics)
         return
