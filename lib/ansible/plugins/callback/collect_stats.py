@@ -48,7 +48,7 @@ class CallbackModule(CallbackBase):
             task_name = self.prev_task_name
             task_runtime = float(task_start_time - self.prev_task_start_time)
             task_runtime_statistic = self._format_statistic(task_runtime, task_start_time)
-            self.statistics[task_name] = task_runtime_statistic
+            self.statistics[self._format_statistic_schema(task_name)] = task_runtime_statistic
         self.prev_task_start_time = task_start_time
         return
 
@@ -60,6 +60,11 @@ class CallbackModule(CallbackBase):
     def _format_statistic(self, stat_value, stat_time):
         statistic = '%f %i' % (stat_value, int(stat_time))
         return statistic
+
+    def _format_statistic_schema(self, stat_name):
+        schema_prefix = 'hostname.playbook_yml'
+        statistic_schema = '%s.%s' % (schema_prefix, stat_name)
+        return statistic_schema
 
     def __init__(self):
         super(CallbackModule, self).__init__()
@@ -88,6 +93,6 @@ class CallbackModule(CallbackBase):
         super(CallbackModule, self).v2_playbook_on_stats(stats)
         playbook_runtime = float(self.playbook_end_time - self.playbook_start_time)
         playbook_runtime_stat = self._format_statistic(playbook_runtime, self.playbook_end_time)
-        self.statistics['playbook_runtime'] = playbook_runtime_stat
+        self.statistics[self._format_statistic_schema('playbook_runtime')] = playbook_runtime_stat
         self._display_statistics()
         return
