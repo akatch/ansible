@@ -47,14 +47,19 @@ class CallbackModule(CallbackBase):
         if self.prev_task_start_time > 0:
             task_name = self.prev_task_name
             task_runtime = float(task_start_time - self.prev_task_start_time)
-            self.statistics[task_name] = task_runtime
+            task_runtime_statistic = self._format_statistic(task_runtime, task_start_time)
+            self.statistics[task_name] = task_runtime_statistic
         self.prev_task_start_time = task_start_time
         return
 
     def _display_statistics(self):
         for statname, statval in self.statistics.iteritems():
-            print('%s %f' % (statname, statval))
+            print('%s %s' % (statname, statval))
         return
+
+    def _format_statistic(self, stat_value, stat_time):
+        statistic = '%f %i' % (stat_value, int(stat_time))
+        return statistic
 
     def __init__(self):
         super(CallbackModule, self).__init__()
@@ -82,6 +87,7 @@ class CallbackModule(CallbackBase):
         self._process_task_time()
         super(CallbackModule, self).v2_playbook_on_stats(stats)
         playbook_runtime = float(self.playbook_end_time - self.playbook_start_time)
-        self.statistics['playbook_runtime'] = playbook_runtime
+        playbook_runtime_stat = self._format_statistic(playbook_runtime, self.playbook_end_time)
+        self.statistics['playbook_runtime'] = playbook_runtime_stat
         self._display_statistics()
         return
