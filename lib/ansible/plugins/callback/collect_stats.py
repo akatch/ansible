@@ -25,26 +25,51 @@ DOCUMENTATION = '''
 """
 Sort stats descending by value
 """
-def sort_statistics(stats):
-    sorted_stats = sorted(stats.iteritems(), key=lambda (k, v): (v, k), reverse=True)
-    return sorted_stats
 
-def print_statistics(stats):
-    for statname, statval in sort_statistics(stats):
-        print('%s %s' % (statname, statval))
-    return
+class AnsibleStatisticsReport():
 
-def send_statistics_report(stats_host, stats_port, stats_dict):
-    # TODO delegate this to a play host
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect((stats_host, int(stats_port)))
+    STATISTIC_SCHEMA_PREFIX = 'hireology.deployments'
 
-    for statname, statval in sort_statistics(stats_dict):
-        statline = '%s %s\n' % (statname, statval)
-        sock.sendall(statline)
+    def __init__(self):
+        self.statistics = dict()
 
-    sock.shutdown(socket.SHUT_WR)
-    sock.close()
+    def add_statistic(self, stat_name, stat_start, stat_end):
+        stat_value = self.calculate_statistic(stat_start, stat_end)
+        stat_schema = '%s.%s' % (self.STATISTIC_SCHEMA_PREFIX, stat_name)
+        self.statistics[stat_schema] = '%f %d' % (stat_value, stat_end)
+        return self.statistics[stat_schema]
+
+    def calculate_statistic(self, stat_start, stat_end):
+        stat_value = stat_end - stat_start
+        return stat_value
+
+    def get_statistics(self):
+        return self.statistics
+
+    def sort_statistics(self):
+        # FIXME sort by v.split().0
+        sorted_stats = sorted(self.statistics.iteritems(), key=lambda (k, v): (v, k), reverse=True)
+        return sorted_stats
+
+    def print_statistics(self):
+        for statname, statval in self.sort_statistics():
+            print('%s %s' % (statname, statval))
+        return
+
+    def send_statistics_report(self, stats_host, stats_port):
+        # TODO delegate this to a play host
+        if stats_host and stats_port:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((stats_host, int(stats_port)))
+
+            for statname, statval in self.sort_statistics():
+                statline = '%s %s\n' % (statname, statval)
+                sock.sendall(statline)
+
+            sock.shutdown(socket.SHUT_WR)
+            sock.close()
+        #else raise a warning but proceed
+        return
 
 class CallbackModule(CallbackBase):
     """
@@ -68,40 +93,30 @@ class CallbackModule(CallbackBase):
         else:
             return task_display_name
 
-    def _process_task_time(self):
-        task_start_time = float(time.time())
-
-        if self.prev_task_start_time > 0:
-            task_name = self.prev_task_name
-            task_runtime = float(task_start_time - self.prev_task_start_time)
-            task_runtime_statistic = self._format_statistic(task_runtime, task_start_time)
-            self.statistics[self._format_statistic_schema(task_name)] = task_runtime_statistic
-        self.prev_task_start_time = task_start_time
-        return
-
-    def _format_statistic(self, stat_value, stat_time):
-        statistic = '%f %i' % (stat_value, int(stat_time))
-        return statistic
-
-    def _format_statistic_schema(self, stat_name):
-        schema_prefix = 'hostname.playbook_yml'
-        statistic_schema = '%s.%s' % (schema_prefix, stat_name)
-        return statistic_schema
-
-
     def __init__(self):
         super(CallbackModule, self).__init__()
         self.prev_task_start_time = float(0)
         self.prev_task_name = None
-        self.statistics = dict()
+        self.stat = AnsibleStatisticsReport()
 
     def v2_playbook_on_play_start(self, play):
         super(CallbackModule, self).v2_playbook_on_play_start(play)
         return
 
     def v2_playbook_on_task_start(self, task, is_conditional):
+        prev_task_end_time = time.time()
+
         super(CallbackModule, self).v2_playbook_on_task_start(task, is_conditional)
-        self._process_task_time()
+
+        # process the *last* task that ran (if there was one)
+        if self.prev_task_start_time > 0:
+            self.stat.add_statistic(self.prev_task_name,
+                                    self.prev_task_start_time,
+                                    prev_task_end_time)
+
+        # persist data for *current* task so it is available when the next task runs
+        # final task will be processed when playbook stats run
+        self.prev_task_start_time = prev_task_end_time
         self.prev_task_name = self._get_task_display_name(task).replace(" ", "_").lower()
         return
 
@@ -111,14 +126,18 @@ class CallbackModule(CallbackBase):
         return
 
     def v2_playbook_on_stats(self, stats):
-        self.playbook_end_time = time.time()
-        self._process_task_time()
+        playbook_end_time = time.time()
         super(CallbackModule, self).v2_playbook_on_stats(stats)
-        playbook_runtime = float(self.playbook_end_time - self.playbook_start_time)
-        playbook_runtime_stat = self._format_statistic(playbook_runtime, self.playbook_end_time)
-        self.statistics[self._format_statistic_schema('playbook_runtime')] = playbook_runtime_stat
 
-        # if verbosity > 0:
-        #   print_statistics(self.statistics)
-        send_statistics_report(self.STATS_HOST, self.STATS_PORT, self.statistics)
+        # process the last task
+        self.stat.add_statistic(self.prev_task_name,
+                                self.prev_task_start_time,
+                                playbook_end_time)
+
+        # process playbook runtime
+        self.stat.add_statistic('playbook_runtime', self.playbook_start_time, playbook_end_time)
+
+        #if verbosity > 0:
+        #    self.stat.print_statistics()
+        self.stat.send_statistics_report(self.STATS_HOST, self.STATS_PORT)
         return
