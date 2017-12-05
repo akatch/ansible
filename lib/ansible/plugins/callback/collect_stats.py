@@ -32,21 +32,33 @@ class CallbackModule(CallbackBase):
     CALLBACK_NAME = 'collect_stats'
     CALLBACK_NEEDS_WHITELIST = True
 
+    def _get_task_display_name(self, task):
+        display_name = task.get_name().strip().split(" : ")
+
+        task_display_name = display_name[-1]
+        if task_display_name.startswith("include"):
+            return
+        else:
+            return task_display_name
+
     def _process_task_time(self):
         task_start_time = float(time.time())
 
         if self.prev_task_start_time > 0:
             task_name = self.prev_task_name
             task_runtime = float(task_start_time - self.prev_task_start_time)
-            #print('%s runtime: %f' % (task_name, task_runtime))
             self.statistics[task_name] = task_runtime
         self.prev_task_start_time = task_start_time
+        return
+
+    def _display_statistics(self):
+        for statname, statval in self.statistics.iteritems():
+            print('%s %f' % (statname, statval))
         return
 
     def __init__(self):
         super(CallbackModule, self).__init__()
         self.prev_task_start_time = float(0)
-        self.current_task_name = None
         self.prev_task_name = None
         self.statistics = dict()
 
@@ -56,18 +68,20 @@ class CallbackModule(CallbackBase):
 
     def v2_playbook_on_task_start(self, task, is_conditional):
         super(CallbackModule, self).v2_playbook_on_task_start(task, is_conditional)
-        self.current_task_name = task.get_name()
         self._process_task_time()
-        self.prev_task_name = self.current_task_name
+        self.prev_task_name = self._get_task_display_name(task).replace(" ", "_").lower()
         return
 
     def v2_playbook_on_start(self, playbook):
+        self.playbook_start_time = time.time()
         super(CallbackModule, self).v2_playbook_on_start(playbook)
         return
 
     def v2_playbook_on_stats(self, stats):
+        self.playbook_end_time = time.time()
         self._process_task_time()
         super(CallbackModule, self).v2_playbook_on_stats(stats)
-        for statname, statval in self.statistics.iteritems():
-            print('%s: %f' % (statname, statval))
+        playbook_runtime = float(self.playbook_end_time - self.playbook_start_time)
+        self.statistics['playbook_runtime'] = playbook_runtime
+        self._display_statistics()
         return
