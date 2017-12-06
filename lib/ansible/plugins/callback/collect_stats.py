@@ -106,9 +106,6 @@ class CallbackModule(CallbackBase):
         self.stat = AnsibleStatisticsReport()
         self.stat.set_prefix(stat_prefix)
 
-    def set_options(self, task_keys=None, var_options=None, direct=None):
-        super(CallbackModule, self).set_options(task_keys=task_keys, var_options=var_options, direct=direct)
-
     def v2_playbook_on_play_start(self, play):
         super(CallbackModule, self).v2_playbook_on_play_start(play)
         return
@@ -118,8 +115,6 @@ class CallbackModule(CallbackBase):
 
         super(CallbackModule, self).v2_playbook_on_task_start(task, is_conditional)
 
-        # TODO process_period
-        # must run on each play, task, handler task, cleanup task
         # process the *last* task that ran (if there was one)
         if self.prev_task_start_time > 0:
             self.stat.add_statistic(self.prev_task_name,
