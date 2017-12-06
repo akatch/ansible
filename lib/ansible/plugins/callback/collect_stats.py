@@ -6,6 +6,7 @@ from __future__ import (absolute_import, division, print_function)
 # Make coding more python3-ish
 import time
 import socket
+import os.path
 from ansible.plugins.callback import CallbackBase
 
 __metaclass__ = type
@@ -26,16 +27,22 @@ DOCUMENTATION = '''
 Sort stats descending by value
 """
 
+DEFAULT_STAT_PREFIX = 'ansible'
+
 class AnsibleStatisticsReport():
 
-    STATISTIC_SCHEMA_PREFIX = 'hireology.deployments'
-
+    # TODO make this configurable
     def __init__(self):
         self.statistics = dict()
+        self.prefix = DEFAULT_STAT_PREFIX
+
+    def set_prefix(self, new_prefix):
+        self.prefix = new_prefix
+        return self.prefix
 
     def add_statistic(self, stat_name, stat_start, stat_end):
         stat_value = self.calculate_statistic(stat_start, stat_end)
-        stat_schema = '%s.%s' % (self.STATISTIC_SCHEMA_PREFIX, stat_name)
+        stat_schema = '%s.%s' % (self.prefix, stat_name)
         self.statistics[stat_schema] = '%f %d' % (stat_value, stat_end)
         return self.statistics[stat_schema]
 
@@ -66,6 +73,8 @@ class AnsibleStatisticsReport():
                 statline = '%s %s\n' % (statname, statval)
                 sock.sendall(statline)
 
+            # ensure the socket closes cleanly
+            time.sleep(0.5)
             sock.shutdown(socket.SHUT_WR)
             sock.close()
         #else raise a warning but proceed
@@ -83,21 +92,19 @@ class CallbackModule(CallbackBase):
 
     STATS_HOST = '127.0.0.1'
     STATS_PORT = 2003
+    STATS_PREFIX = 'hireology'
 
-    def _get_task_display_name(self, task):
-        display_name = task.get_name().strip().split(" : ")
-
-        task_display_name = display_name[-1]
-        if task_display_name.startswith("include"):
-            return
-        else:
-            return task_display_name
+    def _format_display_name(self, task):
+        formatted_task_name = task.name.replace(" ", "_").lower()
+        return formatted_task_name
 
     def __init__(self):
         super(CallbackModule, self).__init__()
         self.prev_task_start_time = float(0)
         self.prev_task_name = None
+        stat_prefix = self.STATS_PREFIX
         self.stat = AnsibleStatisticsReport()
+        self.stat.set_prefix(stat_prefix)
 
     def v2_playbook_on_play_start(self, play):
         super(CallbackModule, self).v2_playbook_on_play_start(play)
@@ -117,11 +124,14 @@ class CallbackModule(CallbackBase):
         # persist data for *current* task so it is available when the next task runs
         # final task will be processed when playbook stats run
         self.prev_task_start_time = prev_task_end_time
-        self.prev_task_name = self._get_task_display_name(task).replace(" ", "_").lower()
+        self.prev_task_name = self._format_display_name(task)
         return
 
     def v2_playbook_on_start(self, playbook):
         self.playbook_start_time = time.time()
+        # add playbook filename to stats prefix
+        playbook_name = os.path.split(playbook._file_name)[1].replace('.', '_')
+        self.stat.set_prefix('%s.%s' % (self.stat.prefix, playbook_name))
         super(CallbackModule, self).v2_playbook_on_start(playbook)
         return
 
@@ -139,5 +149,6 @@ class CallbackModule(CallbackBase):
 
         #if verbosity > 0:
         #    self.stat.print_statistics()
+        #if play not in check_mode:
         self.stat.send_statistics_report(self.STATS_HOST, self.STATS_PORT)
         return
