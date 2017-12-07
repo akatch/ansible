@@ -1,9 +1,8 @@
-from __future__ import (absolute_import, division, print_function)
 # (C) 2017 Allyson Bowles <github.com/akatch>
 # (C) 2017 Ansible Project
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-# Make coding more python3-ish
+from __future__ import (absolute_import, division, print_function)
 import time
 import socket
 import os.path
@@ -23,18 +22,15 @@ DOCUMENTATION = '''
       - whitelisting in configuration
 '''
 
-"""
-Sort stats descending by value
-"""
-
-DEFAULT_STAT_PREFIX = 'ansible'
 
 class AnsibleStatisticsReport():
+
+    DEFAULT_STAT_PREFIX = 'ansible'
 
     # TODO make this configurable
     def __init__(self):
         self.statistics = dict()
-        self.prefix = DEFAULT_STAT_PREFIX
+        self.prefix = self.DEFAULT_STAT_PREFIX
 
     def set_prefix(self, new_prefix):
         self.prefix = new_prefix
@@ -63,8 +59,26 @@ class AnsibleStatisticsReport():
             print('%s %s' % (statname, statval))
         return
 
+    # process each statistic period ( playbook, play, task, handler_task, etc )
+    def process_statistics_period(self, prev_start_time, prev_end_time, prev_name):
+        # process the *last* period that ran
+        formatted_stat_name = self.format_statistic_name(prev_name)
+        self.add_statistic(formatted_stat_name, prev_start_time, prev_end_time)
+
+        # persist data for *current* task so it is available when the next task runs
+        # final task will be processed when playbook stats run
+        prev_start_time = prev_end_time
+        return prev_start_time
+
+    def format_statistic_name(self, task_name):
+        # TODO strip special characters other than - and _
+        # task.name from handlers still includes role prefix, so remove it
+        formatted_task_name = task_name.replace(" ", "_").replace(".", "_").lower()
+        return formatted_task_name
+
     def send_statistics_report(self, stats_host, stats_port):
         # TODO delegate this to a play host
+        # currently the control box must be able to connect directly to STATS_HOST:STATS_PORT
         if stats_host and stats_port:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((stats_host, int(stats_port)))
@@ -77,7 +91,7 @@ class AnsibleStatisticsReport():
             time.sleep(0.5)
             sock.shutdown(socket.SHUT_WR)
             sock.close()
-        #else raise a warning but proceed
+        # TODO else raise a warning but proceed
         return
 
 class CallbackModule(CallbackBase):
@@ -90,13 +104,10 @@ class CallbackModule(CallbackBase):
     CALLBACK_NAME = 'collect_stats'
     CALLBACK_NEEDS_WHITELIST = True
 
+    # TODO make these configurable
     STATS_HOST = '127.0.0.1'
     STATS_PORT = 2003
     STATS_PREFIX = 'hireology'
-
-    def _format_display_name(self, task):
-        formatted_task_name = task.name.replace(" ", "_").lower()
-        return formatted_task_name
 
     def __init__(self):
         super(CallbackModule, self).__init__()
@@ -104,6 +115,7 @@ class CallbackModule(CallbackBase):
         self.prev_task_name = None
         stat_prefix = self.STATS_PREFIX
         self.stat = AnsibleStatisticsReport()
+        # TODO cant we just provide this at class instantiation
         self.stat.set_prefix(stat_prefix)
 
     def v2_playbook_on_play_start(self, play):
@@ -117,19 +129,22 @@ class CallbackModule(CallbackBase):
 
         # process the *last* task that ran (if there was one)
         if self.prev_task_start_time > 0:
-            self.stat.add_statistic(self.prev_task_name,
-                                    self.prev_task_start_time,
-                                    prev_task_end_time)
+            prev_task_end_time = self.stat.process_statistics_period(self.prev_task_start_time, prev_task_end_time, self.prev_task_name)
 
-        # persist data for *current* task so it is available when the next task runs
-        # final task will be processed when playbook stats run
         self.prev_task_start_time = prev_task_end_time
-        self.prev_task_name = self._format_display_name(task)
+        self.prev_task_name = task.name.split(":")[-1].strip().replace(" ", "_").lower()
         return
+
+    def v2_playbook_on_cleanup_task_start(self, task):
+        self.v2_playbook_on_task_start(task, False)
+
+    def v2_playbook_on_handler_task_start(self, task):
+        self.v2_playbook_on_task_start(task, False)
 
     def v2_playbook_on_start(self, playbook):
         self.playbook_start_time = time.time()
         # add playbook filename to stats prefix
+        # FIXME i think this is naughty
         playbook_name = os.path.split(playbook._file_name)[1].replace('.', '_')
         self.stat.set_prefix('%s.%s' % (self.stat.prefix, playbook_name))
         super(CallbackModule, self).v2_playbook_on_start(playbook)
